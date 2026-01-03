@@ -10,9 +10,17 @@ Bu dosya, React Native/Expo projelerinde spagetti koddan kaçınmak için featur
 src/
 ├── app/                      # Expo Router - Sadece routing, layout, navigation
 │   ├── (tabs)/
-│   │   ├── _layout.tsx
-│   │   ├── index.tsx
-│   │   └── profile.tsx
+│   │   ├── _layout.tsx       # NativeTabs
+│   │   ├── index/            # Her tab kendi klasöründe (native header için)
+│   │   │   ├── _layout.tsx   # Stack (header config)
+│   │   │   └── index.tsx     # Screen content
+│   │   ├── prayer/
+│   │   │   ├── _layout.tsx
+│   │   │   └── index.tsx
+│   │   └── more/
+│   │       ├── _layout.tsx
+│   │       ├── index.tsx
+│   │       └── settings.tsx  # Push screen (aynı Stack içinde)
 │   ├── (auth)/
 │   │   ├── _layout.tsx
 │   │   ├── login.tsx
@@ -91,6 +99,7 @@ src/
 │   └── index.ts
 │
 ├── constants/                # App constants
+│   ├── navigation.ts         # Navigation config, colors, screen options
 │   ├── colors.ts
 │   ├── spacing.ts
 │   ├── typography.ts
@@ -451,24 +460,197 @@ export type { InputProps } from './Input';
 **Expo Router screen yapısı:**
 
 ```typescript
-// app/(tabs)/index.tsx
-import { View } from 'react-native';
+// app/(tabs)/index/index.tsx
+import { ScrollView, StyleSheet } from 'react-native';
 import { PostList } from '@/features/posts';
-import { SafeArea } from '@/components/layout';
 
 export default function HomeScreen() {
   return (
-    <SafeArea>
+    <ScrollView
+      contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
+      showsVerticalScrollIndicator={false}
+    >
       <PostList />
-    </SafeArea>
+    </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  content: {
+    padding: 20,
+  },
+});
 ```
 
 **Screen dosyaları sadece:**
 - Layout composition yapar
 - Feature component'larını birleştirir
 - Business logic İÇERMEZ
+
+### 10. Expo Router Navigation Kuralları
+
+#### Tab Navigation Yapısı (NativeTabs + Nested Stack)
+
+iOS 26 native header'ları için **her tab kendi Stack'ine** sahip olmalı:
+
+```
+app/
+├── (tabs)/
+│   ├── _layout.tsx           # NativeTabs
+│   ├── index/
+│   │   ├── _layout.tsx       # Stack (header config)
+│   │   └── index.tsx         # Screen content
+│   ├── prayer/
+│   │   ├── _layout.tsx       # Stack
+│   │   └── index.tsx
+│   └── more/
+│       ├── _layout.tsx       # Stack
+│       ├── index.tsx
+│       └── settings.tsx      # Push screen
+```
+
+#### NativeTabs Layout
+
+```typescript
+// app/(tabs)/_layout.tsx
+import { Platform } from 'react-native';
+import { NativeTabs, Icon, Label, VectorIcon } from 'expo-router/unstable-native-tabs';
+import { MaterialIcons } from '@expo/vector-icons';
+import { colors } from '@/constants/navigation';
+
+export default function TabLayout() {
+  return (
+    <NativeTabs tintColor={colors.primary}>
+      <NativeTabs.Trigger name="index">
+        {Platform.select({
+          ios: <Icon sf="house.fill" />,
+          android: <Icon src={<VectorIcon family={MaterialIcons} name="home" />} />,
+        })}
+        <Label>Ana Sayfa</Label>
+      </NativeTabs.Trigger>
+      {/* ... diğer tab'lar */}
+    </NativeTabs>
+  );
+}
+```
+
+#### Stack Layout (Her Tab İçin)
+
+```typescript
+// app/(tabs)/index/_layout.tsx
+import { Stack } from 'expo-router';
+import { defaultScreenOptions, screens } from '@/constants/navigation';
+
+export default function HomeLayout() {
+  return (
+    <Stack screenOptions={defaultScreenOptions}>
+      <Stack.Screen name="index" options={screens.home} />
+    </Stack>
+  );
+}
+```
+
+#### Navigation Constants (Merkezi Config)
+
+```typescript
+// constants/navigation.ts
+import { Platform } from 'react-native';
+import type { NativeStackNavigationOptions } from '@react-navigation/native-stack';
+
+// App renkleri
+export const colors = {
+  primary: '#C45A3B',
+  background: '#FAF8F5',
+  text: '#2C2416',
+};
+
+// iOS version check
+function isIOS26OrLater(): boolean {
+  if (Platform.OS !== 'ios') return false;
+  return parseInt(Platform.Version as string, 10) >= 26;
+}
+
+// Tüm Stack'ler için ortak options
+export const defaultScreenOptions: NativeStackNavigationOptions = {
+  headerTintColor: '#2C2416',
+  headerTitleStyle: {
+    fontFamily: 'Lora_600SemiBold',
+    fontSize: 18,
+  },
+  headerShadowVisible: false,
+  headerBackTitle: 'Geri',
+  contentStyle: { backgroundColor: '#FAF8F5' },
+  // iOS large title için ŞART:
+  headerTransparent: Platform.OS === 'ios',
+  headerBlurEffect: Platform.OS === 'ios'
+    ? (isIOS26OrLater() ? undefined : 'regular')
+    : undefined,
+};
+
+// Large title options
+export const largeTitleOptions: NativeStackNavigationOptions = {
+  headerLargeTitleEnabled: true,  // ⚠️ headerLargeTitle DEĞİL!
+  headerLargeTitleStyle: {
+    fontFamily: 'Lora_700Bold',
+    color: '#2C2416',
+  },
+};
+
+// Screen tanımları
+export const screens = {
+  home: { title: 'Ana Sayfa', ...largeTitleOptions },
+  prayer: { title: 'Namaz Vakitleri', ...largeTitleOptions },
+  // ...
+} as const;
+```
+
+#### iOS Large Title Çalışması İçin Kritik Kurallar
+
+**⚠️ DEPRECATED:** `headerLargeTitle` → Yerine `headerLargeTitleEnabled` kullan
+
+**ScrollView/FlatList Kuralları:**
+
+```typescript
+// ✅ DOĞRU
+<ScrollView
+  contentContainerStyle={styles.content}
+  contentInsetAdjustmentBehavior="automatic"
+>
+
+// ❌ YANLIŞ - style prop header animasyonunu BOZAR!
+<ScrollView
+  style={styles.container}  // HAYIR!
+  contentContainerStyle={styles.content}
+>
+```
+
+**Gerekli iOS Config'ler:**
+1. `headerTransparent: Platform.OS === 'ios'` - iOS için şart
+2. `headerBlurEffect: 'regular'` - iOS 26 öncesi için
+3. `contentInsetAdjustmentBehavior="automatic"` - ScrollView'da şart
+4. ScrollView'da `style` prop KULLANMA, sadece `contentContainerStyle`
+
+#### Header Button Ekleme
+
+```typescript
+// Native iOS style button kullan
+import { Button as RNButton } from 'react-native';
+import { colors } from '@/constants/navigation';
+
+// Screen içinde:
+<Stack.Screen
+  options={{
+    headerRight: () => (
+      <RNButton
+        title="Ekle"
+        onPress={handleAdd}
+        color={colors.primary}
+      />
+    ),
+  }}
+/>
+```
 
 ### 9. Provider Setup
 
@@ -1459,4 +1641,3 @@ export default function App() {
 **Design System Version**: 1.0  
 **Last Updated**: 2026-01-03  
 **Author**: Abdullah's Vinyl Editorial
-
